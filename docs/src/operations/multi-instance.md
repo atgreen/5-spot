@@ -48,7 +48,7 @@ spec:
       serviceAccountName: 5spot-controller
       containers:
         - name: controller
-          image: ghcr.io/firestoned/5spot-rs:latest
+          image: ghcr.io/finos/5spot-rs:latest
           env:
             - name: POD_NAME
               valueFrom:

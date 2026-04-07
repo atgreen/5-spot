@@ -15,7 +15,7 @@ kubectl apply -f deploy/crds/scheduledmachine.yaml
 Or from the repository:
 
 ```bash
-kubectl apply -f https://raw.githubusercontent.com/firestoned/5-spot/main/deploy/crds/scheduledmachine.yaml
+kubectl apply -f https://raw.githubusercontent.com/finos/5-spot/main/deploy/crds/scheduledmachine.yaml
 ```
 
 ### Verify Installation

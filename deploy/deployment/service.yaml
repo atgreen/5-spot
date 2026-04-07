@@ -1,0 +1,25 @@
+---
+# 5-Spot Controller Service
+# Exposes metrics endpoint for Prometheus scraping
+apiVersion: v1
+kind: Service
+metadata:
+  name: 5spot-controller
+  namespace: 5spot-system
+  labels:
+    app: 5spot-controller
+    app.kubernetes.io/name: 5spot
+    app.kubernetes.io/component: controller
+spec:
+  type: ClusterIP
+  selector:
+    app: 5spot-controller
+  ports:
+    - name: metrics
+      port: 8080
+      targetPort: metrics
+      protocol: TCP
+    - name: health
+      port: 8081
+      targetPort: health
+      protocol: TCP

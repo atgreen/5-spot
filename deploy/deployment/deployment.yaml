@@ -35,8 +35,7 @@ spec:
         runAsNonRoot: true
       containers:
         - name: controller
-          #image: ghcr.io/firestoned/5-spot:latest
-          image: docker-sc90-dev.artifactory.fg.rbc.com/5-spot:latest-dev
+          image: ghcr.io/RBC/5-spot:latest
           imagePullPolicy: IfNotPresent
           env:
             - name: RUST_LOG
@@ -71,16 +70,20 @@ spec:
               protocol: TCP
           livenessProbe:
             httpGet:
-              path: /health
+              path: /healthz
               port: health
             initialDelaySeconds: 10
             periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
           readinessProbe:
             httpGet:
-              path: /ready
+              path: /readyz
               port: health
             initialDelaySeconds: 5
             periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:

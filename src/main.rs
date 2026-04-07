@@ -1,16 +1,20 @@
 // Main entry point for 5-Spot Machine Scheduler
 
+use std::sync::Arc;
+
 use anyhow::Result;
 use clap::Parser;
 use five_spot::constants::{HEALTH_PORT, METRICS_PORT};
 use five_spot::crd::ScheduledMachine;
+use five_spot::health::{start_health_server, HealthState};
+use five_spot::metrics::init_controller_info;
 use five_spot::reconcilers::{error_policy, reconcile_scheduled_machine, Context};
 use futures::StreamExt;
 use kube::{
+    api::ListParams,
     runtime::{watcher::Config, Controller},
     Api, Client,
 };
-use std::sync::Arc;
 use tracing::{error, info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -69,9 +73,18 @@ async fn main() -> Result<()> {
         "Starting 5-Spot Machine Scheduler"
     );
 
+    // Initialize health state
+    let health_state = HealthState::new();
+
+    // Initialize controller info metric
+    init_controller_info(env!("CARGO_PKG_VERSION"), cli.instance_id);
+
     // Create Kubernetes client
     let client = Client::try_default().await?;
     info!("Connected to Kubernetes API");
+
+    // Mark Kubernetes as connected
+    health_state.set_k8s_connected(true);
 
     // Create shared context
     let context = Arc::new(Context::new(
@@ -83,9 +96,29 @@ async fn main() -> Result<()> {
     // Create API for ScheduledMachine resources
     let scheduled_machines = Api::<ScheduledMachine>::all(client.clone());
 
+    // Verify CRD is installed before starting controller
+    if let Err(e) = check_crd_installed(&scheduled_machines).await {
+        error!(
+            error = %e,
+            "ScheduledMachine CRD is not installed. Please install the CRD first:"
+        );
+        error!("  kubectl apply -f deploy/crds/scheduledmachine.yaml");
+        error!("Or generate and apply: cargo run --bin crdgen | kubectl apply -f -");
+        return Err(anyhow::anyhow!(
+            "Required CRD 'scheduledmachines.5spot.io' is not installed in the cluster"
+        ));
+    }
+    info!("ScheduledMachine CRD verified");
+
     // Start health and metrics servers
-    tokio::spawn(start_health_server(cli.health_port));
+    let health_state_clone = health_state.clone();
+    tokio::spawn(async move {
+        start_health_server(cli.health_port, health_state_clone).await;
+    });
     tokio::spawn(run_metrics_server(cli.metrics_port));
+
+    // Mark controller as ready
+    health_state.set_ready(true);
 
     info!("Starting controller for ScheduledMachine resources");
 
@@ -113,21 +146,18 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-/// Start health check server
-async fn start_health_server(port: u16) {
-    use warp::Filter;
-
-    info!(port = port, "Starting health check server");
-
-    let health =
-        warp::path("health").map(|| warp::reply::with_status("OK", warp::http::StatusCode::OK));
-
-    let ready =
-        warp::path("ready").map(|| warp::reply::with_status("OK", warp::http::StatusCode::OK));
-
-    let routes = health.or(ready);
-
-    warp::serve(routes).run(([0, 0, 0, 0], port)).await;
+/// Check if the `ScheduledMachine` CRD is installed in the cluster
+async fn check_crd_installed(api: &Api<ScheduledMachine>) -> Result<()> {
+    // Try to list resources with limit 0 - this will fail if CRD doesn't exist
+    api.list(&ListParams::default().limit(1))
+        .await
+        .map_err(|e| {
+            anyhow::anyhow!(
+                "Failed to access ScheduledMachine resources: {e}. \
+                 This usually means the CRD is not installed."
+            )
+        })?;
+    Ok(())
 }
 
 /// Run the metrics server on the specified port

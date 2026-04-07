@@ -179,6 +179,7 @@ pub struct EmbeddedResource {
 fn arbitrary_object_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
     schemars::json_schema!({
         "type": "object",
+        "additionalProperties": true,
         "x-kubernetes-preserve-unknown-fields": true
     })
 }

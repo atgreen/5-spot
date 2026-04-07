@@ -13,13 +13,13 @@ Get started with 5-Spot in minutes.
 ### 1. Apply the CRD
 
 ```bash
-kubectl apply -f https://raw.githubusercontent.com/firestoned/5-spot/main/deploy/crds/scheduledmachine.yaml
+kubectl apply -f https://raw.githubusercontent.com/finos/5-spot/main/deploy/crds/scheduledmachine.yaml
 ```
 
 ### 2. Deploy the Operator
 
 ```bash
-kubectl apply -f https://raw.githubusercontent.com/firestoned/5-spot/main/deploy/deployment/
+kubectl apply -f https://raw.githubusercontent.com/finos/5-spot/main/deploy/deployment/
 ```
 
 ### 3. Verify Installation

@@ -1,0 +1,20 @@
+---
+# 5-Spot Controller ConfigMap
+# Configuration options for the controller
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: 5spot-controller-config
+  namespace: 5spot-system
+  labels:
+    app: 5spot-controller
+    app.kubernetes.io/name: 5spot
+    app.kubernetes.io/component: controller
+data:
+  # Logging configuration
+  RUST_LOG: "info,kube=warn,hyper=warn,tower=warn"
+  RUST_LOG_FORMAT: "json"
+  
+  # Metrics and health ports
+  METRICS_PORT: "8080"
+  HEALTH_PORT: "8081"

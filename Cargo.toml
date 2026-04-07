@@ -22,7 +22,7 @@ path = "src/bin/crddoc.rs"
 
 [dependencies]
 kube = { version = "3.1", features = ["runtime", "derive", "client", "ws"] }
-k8s-openapi = { version = "0.27", features = ["latest"] }
+k8s-openapi = { version = "0.27", features = ["latest", "schemars"] }
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

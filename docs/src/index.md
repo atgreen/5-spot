@@ -1,7 +1,7 @@
 # Introduction
 
-[![Main Branch CI/CD](https://github.com/firestoned/5-spot/actions/workflows/main.yaml/badge.svg)](https://github.com/firestoned/5-spot/actions/workflows/main.yaml)
-[![PR CI](https://github.com/firestoned/5-spot/actions/workflows/pr.yaml/badge.svg)](https://github.com/firestoned/5-spot/actions/workflows/pr.yaml)
+[![Main Branch CI/CD](https://github.com/finos/5-spot/actions/workflows/main.yaml/badge.svg)](https://github.com/finos/5-spot/actions/workflows/main.yaml)
+[![PR CI](https://github.com/finos/5-spot/actions/workflows/pr.yaml/badge.svg)](https://github.com/finos/5-spot/actions/workflows/pr.yaml)
 
 **5-Spot** is a cloud-native Kubernetes controller for managing time-based machine scheduling on physical nodes using Cluster API (CAPI). It enables you to automatically add and remove machines from your CAPI clusters based on time schedules, bringing cost optimization and resource efficiency to your infrastructure.
 
@@ -151,8 +151,8 @@ Current version: **v0.1.0-alpha**
 
 ## Support & Community
 
-- **GitHub Issues**: [Report bugs or request features](https://github.com/firestoned/5-spot/issues)
-- **GitHub Discussions**: [Ask questions and share ideas](https://github.com/firestoned/5-spot/discussions)
+- **GitHub Issues**: [Report bugs or request features](https://github.com/finos/5-spot/issues)
+- **GitHub Discussions**: [Ask questions and share ideas](https://github.com/finos/5-spot/discussions)
 - **Documentation**: You're reading it!
 
 ## License

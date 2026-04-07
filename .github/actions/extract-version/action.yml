@@ -1,4 +1,4 @@
-# Copyright (c) 2025 Erick Bourgeois, firestoned
+# Copyright (c) 2025 Erick Bourgeois, finos
 # SPDX-License-Identifier: MIT
 
 name: 'Extract Version Information'
@@ -11,7 +11,7 @@ branding:
 
 inputs:
   repository:
-    description: 'Repository name (e.g., firestoned/myapp) - used for image repository naming'
+    description: 'Repository name (e.g., finos/myapp) - used for image repository naming'
     required: true
   workflow-type:
     description: 'Workflow type: main, pr, or release'
@@ -38,7 +38,7 @@ outputs:
     description: 'Docker image tag (e.g., main-2025.12.17, pr-42, v0.2.0)'
     value: ${{ steps.extract.outputs.image-tag }}
   image-repository:
-    description: 'Docker repository name (e.g., firestoned/myapp)'
+    description: 'Docker repository name (e.g., finos/myapp)'
     value: ${{ steps.extract.outputs.image-repository }}
   short-sha:
     description: 'Short 7-character SHA'

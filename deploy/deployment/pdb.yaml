@@ -1,0 +1,17 @@
+---
+# 5-Spot Controller PodDisruptionBudget
+# Ensures at least one replica is available during voluntary disruptions
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: 5spot-controller
+  namespace: 5spot-system
+  labels:
+    app: 5spot-controller
+    app.kubernetes.io/name: 5spot
+    app.kubernetes.io/component: controller
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: 5spot-controller

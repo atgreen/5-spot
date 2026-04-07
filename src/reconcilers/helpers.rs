@@ -1,6 +1,19 @@
 // Helper functions for ScheduledMachine reconciliation
 // This file contains utility functions separated from the main reconciler logic
 
+use std::sync::Arc;
+use std::time::Duration;
+
+use chrono::{DateTime, Datelike, Timelike, Utc};
+use chrono_tz::Tz;
+use kube::{
+    api::{Api, Patch, PatchParams},
+    runtime::controller::Action,
+    Client, Resource, ResourceExt,
+};
+use serde_json::json;
+use tracing::{debug, error, info};
+
 use super::{Context, ReconcilerError};
 use crate::constants::{
     API_VERSION_FULL, CAPI_CLUSTER_NAME_LABEL, CAPI_GROUP, CAPI_MACHINE_API_VERSION,
@@ -11,17 +24,7 @@ use crate::constants::{
     REASON_RECONCILE_SUCCEEDED, TIMER_REQUEUE_SECS,
 };
 use crate::crd::{Condition, ScheduledMachine, ScheduledMachineStatus};
-use chrono::{DateTime, Datelike, Timelike, Utc};
-use chrono_tz::Tz;
-use kube::{
-    api::{Api, Patch, PatchParams},
-    runtime::controller::Action,
-    Client, Resource, ResourceExt,
-};
-use serde_json::json;
-use std::sync::Arc;
-use std::time::Duration;
-use tracing::{debug, error, info};
+use crate::metrics::{record_node_drain, record_pod_eviction};
 
 // ============================================================================
 // Resource processing and consistent hashing
@@ -663,18 +666,14 @@ async fn create_dynamic_resource(
     obj: serde_json::Value,
 ) -> Result<(), kube::Error> {
     let (group, version) = parse_api_version(api_version);
+    let plural = format!("{}s", kind.to_lowercase());
 
-    let api: Api<kube::core::DynamicObject> = Api::namespaced_with(
-        client.clone(),
-        namespace,
-        &kube::discovery::ApiResource {
-            group,
-            version,
-            kind: kind.to_string(),
-            plural: format!("{}s", kind.to_lowercase()),
-            api_version: api_version.to_string(),
-        },
+    let ar = kube::api::ApiResource::from_gvk_with_plural(
+        &kube::api::GroupVersionKind::gvk(&group, &version, kind),
+        &plural,
     );
+
+    let api: Api<kube::core::DynamicObject> = Api::namespaced_with(client.clone(), namespace, &ar);
 
     let dyn_obj: kube::core::DynamicObject =
         serde_json::from_value(obj).map_err(kube::Error::SerdeError)?;
@@ -716,17 +715,12 @@ pub async fn remove_machine_from_cluster(
     );
 
     // Get the Machine API
-    let machines: Api<kube::core::DynamicObject> = Api::namespaced_with(
-        client.clone(),
-        namespace,
-        &kube::discovery::ApiResource {
-            group: CAPI_GROUP.to_string(),
-            version: CAPI_MACHINE_API_VERSION.to_string(),
-            kind: "Machine".to_string(),
-            plural: CAPI_RESOURCE_MACHINES.to_string(),
-            api_version: CAPI_MACHINE_API_VERSION_FULL.to_string(),
-        },
+    let ar = kube::api::ApiResource::from_gvk_with_plural(
+        &kube::api::GroupVersionKind::gvk(CAPI_GROUP, CAPI_MACHINE_API_VERSION, "Machine"),
+        CAPI_RESOURCE_MACHINES,
     );
+    let machines: Api<kube::core::DynamicObject> =
+        Api::namespaced_with(client.clone(), namespace, &ar);
 
     // Delete the Machine resource if it exists
     match machines
@@ -767,17 +761,12 @@ pub async fn get_node_from_machine(
     namespace: &str,
     machine_name: &str,
 ) -> Result<Option<String>, ReconcilerError> {
-    let machines: Api<kube::core::DynamicObject> = Api::namespaced_with(
-        client.clone(),
-        namespace,
-        &kube::discovery::ApiResource {
-            group: CAPI_GROUP.to_string(),
-            version: CAPI_MACHINE_API_VERSION.to_string(),
-            kind: "Machine".to_string(),
-            plural: CAPI_RESOURCE_MACHINES.to_string(),
-            api_version: CAPI_MACHINE_API_VERSION_FULL.to_string(),
-        },
+    let ar = kube::api::ApiResource::from_gvk_with_plural(
+        &kube::api::GroupVersionKind::gvk(CAPI_GROUP, CAPI_MACHINE_API_VERSION, "Machine"),
+        CAPI_RESOURCE_MACHINES,
     );
+    let machines: Api<kube::core::DynamicObject> =
+        Api::namespaced_with(client.clone(), namespace, &ar);
 
     match machines.get(machine_name).await {
         Ok(machine) => {
@@ -875,15 +864,21 @@ async fn evict_pod(
     };
 
     match pods_ns.delete(pod_name, &delete_params).await {
-        Ok(_) => debug!(pod = %pod_name, namespace = %pod_namespace, "Pod eviction initiated"),
+        Ok(_) => {
+            debug!(pod = %pod_name, namespace = %pod_namespace, "Pod eviction initiated");
+            record_pod_eviction(true);
+        }
         Err(kube::Error::Api(e)) if e.code == 404 => {
             debug!(pod = %pod_name, namespace = %pod_namespace, "Pod already deleted");
+            record_pod_eviction(true);
         }
         Err(kube::Error::Api(e)) if e.code == 429 => {
             info!(pod = %pod_name, namespace = %pod_namespace, "Pod eviction blocked by PDB");
+            record_pod_eviction(false);
         }
         Err(e) => {
             error!(pod = %pod_name, namespace = %pod_namespace, error = %e, "Failed to evict pod");
+            record_pod_eviction(false);
             return Err(ReconcilerError::CapiError(format!(
                 "Failed to evict pod {pod_name} from node {node_name}: {e}"
             )));
@@ -931,6 +926,7 @@ pub async fn drain_node_with_timeout(
     let start_time = std::time::Instant::now();
     for pod in pods_to_evict {
         if start_time.elapsed() >= timeout {
+            record_node_drain(false);
             return Err(ReconcilerError::CapiError(format!(
                 "Node drain timeout exceeded for {node_name}"
             )));
@@ -944,6 +940,7 @@ pub async fn drain_node_with_timeout(
     }
 
     info!(node = %node_name, elapsed_secs = start_time.elapsed().as_secs(), "Node drain completed");
+    record_node_drain(true);
     Ok(())
 }
 

@@ -13,7 +13,7 @@ kubectl apply -f deploy/deployment/
 ### Using Helm (Coming Soon)
 
 ```bash
-helm repo add 5spot https://firestoned.github.io/5-spot
+helm repo add 5spot https://finos.github.io/5-spot
 helm install 5spot 5spot/5spot-controller
 ```
 
@@ -88,7 +88,7 @@ spec:
       serviceAccountName: 5spot-controller
       containers:
         - name: controller
-          image: ghcr.io/firestoned/5-spot:latest
+          image: ghcr.io/finos/5-spot:latest
           env:
             - name: POD_NAME
               valueFrom:

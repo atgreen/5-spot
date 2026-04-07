@@ -1,7 +1,7 @@
 # Copyright (c) 2025 Erick Bourgeois, RBC Capital Markets
 # SPDX-License-Identifier: MIT
 
-.PHONY: help install build build-debug build-linux-amd64 build-linux-arm64 build-all-platforms prepare-binaries prepare-binaries-native test test-lib lint format clean crds crddoc docs docs-serve docs-clean docs-rustdoc run-local docker-build docker-build-chainguard docker-push docker-buildx docker-buildx-chainguard gitleaks gitleaks-install install-git-hooks security-scan-local
+.PHONY: help install build build-debug build-linux-amd64 build-linux-arm64 build-macos-arm64 prepare-binaries-linux-amd64 prepare-binaries-linux-arm64 test test-lib lint format clean crds crddoc docs docs-serve docs-clean docs-rustdoc run-local docker-build docker-build-amd64 docker-build-arm64 docker-build-chainguard docker-push docker-buildx docker-buildx-chainguard gitleaks gitleaks-install install-git-hooks security-scan-local sbom
 
 # Image configuration
 REGISTRY ?= ghcr.io
@@ -9,9 +9,11 @@ IMAGE_NAME ?= 5spot
 IMAGE_TAG ?= latest-dev
 NAMESPACE ?= 5-spot-system
 
-# Platform configuration for multi-arch builds
+# Platform configuration for builds
+# Default is linux/amd64 (most common for Kubernetes deployments)
+# Override with: make docker-buildx BUILD_PLATFORMS=linux/arm64
 PLATFORM ?= linux/amd64
-BUILD_PLATFORMS ?= linux/arm64,linux/amd64
+BUILD_PLATFORMS ?= linux/amd64
 
 # Base images for containers (glibc-based for GNU target compatibility)
 BASE_IMAGE ?= gcr.io/distroless/cc-debian12:nonroot
@@ -50,7 +52,7 @@ help: ## Show this help message
 	@echo 'Usage: make [target]'
 	@echo ''
 	@echo 'Available targets:'
-	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  %-20s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z0-9_-]+:.*## / {printf "  %-24s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
 # ============================================================
 # Development
@@ -66,48 +68,67 @@ build: ## Build the Rust binary (release, native platform)
 build-debug: ## Build the Rust binary (debug)
 	cargo build
 
-build-linux-amd64: ## Build for Linux x86_64 (requires cross or Linux)
+build-linux-amd64: ## Build for Linux x86_64 (requires cross toolchain)
 	@if command -v cross >/dev/null 2>&1; then \
-		MALLOC_CONF=abort_conf:false cross build --release --target x86_64-unknown-linux-gnu; \
+		echo "Building with cross for x86_64-unknown-linux-gnu..."; \
+		if [ -n "$(AIRGAP_CARGO_HOME)" ]; then \
+			CARGO_HOME="$(AIRGAP_CARGO_HOME)" cross build --release --target x86_64-unknown-linux-gnu; \
+		else \
+			cross build --release --target x86_64-unknown-linux-gnu; \
+		fi; \
 	elif [ "$$(uname -s)" = "Linux" ] && [ "$$(uname -m)" = "x86_64" ]; then \
+		echo "Building natively on Linux x86_64..."; \
+		cargo build --release --target x86_64-unknown-linux-gnu; \
+	elif command -v x86_64-linux-gnu-gcc >/dev/null 2>&1; then \
+		echo "Building with cargo + x86_64-linux-gnu toolchain..."; \
 		cargo build --release --target x86_64-unknown-linux-gnu; \
 	else \
-		echo "ERROR: Cross-compilation requires 'cross' tool. Install with: cargo install cross"; \
-		echo "       Or run on Linux x86_64, or use GitHub Actions CI."; \
+		echo "ERROR: Cross-compilation to Linux x86_64 requires one of:"; \
+		echo "  1. cross tool (recommended): cargo install cross"; \
+		echo "  2. GNU toolchain: brew tap messense/macos-cross-toolchains && brew install x86_64-unknown-linux-gnu"; \
+		echo "  3. Run on native Linux x86_64"; \
 		exit 1; \
 	fi
 
-build-linux-arm64: ## Build for Linux ARM64 (requires cross or Linux ARM64)
+build-macos-arm64: ## Build for macOS ARM64 (Apple Silicon)
+	@if [ "$$(uname -s)" = "Darwin" ] && [ "$$(uname -m)" = "arm64" ]; then \
+		cargo build --release --target aarch64-apple-darwin; \
+	else \
+		echo "ERROR: This target requires macOS on Apple Silicon (arm64)."; \
+		exit 1; \
+	fi
+
+build-linux-arm64: ## Build for Linux ARM64 (requires cross toolchain)
 	@if command -v cross >/dev/null 2>&1; then \
-		MALLOC_CONF=abort_conf:false cross build --release --target aarch64-unknown-linux-gnu; \
+		echo "Building with cross for aarch64-unknown-linux-gnu..."; \
+		cross build --release --target aarch64-unknown-linux-gnu; \
 	elif [ "$$(uname -s)" = "Linux" ] && [ "$$(uname -m)" = "aarch64" ]; then \
+		echo "Building natively on Linux ARM64..."; \
+		cargo build --release --target aarch64-unknown-linux-gnu; \
+	elif command -v aarch64-linux-gnu-gcc >/dev/null 2>&1; then \
+		echo "Building with cargo + aarch64-linux-gnu toolchain..."; \
 		cargo build --release --target aarch64-unknown-linux-gnu; \
 	else \
-		echo "ERROR: Cross-compilation requires 'cross' tool. Install with: cargo install cross"; \
-		echo "       Or run on Linux ARM64, or use GitHub Actions CI."; \
+		echo "ERROR: Cross-compilation to Linux ARM64 requires one of:"; \
+		echo "  1. cross tool (recommended): cargo install cross"; \
+		echo "  2. GNU toolchain: brew tap messense/macos-cross-toolchains && brew install aarch64-unknown-linux-gnu"; \
+		echo "  3. Run on native Linux ARM64"; \
 		exit 1; \
 	fi
 
-build-all-platforms: build-linux-amd64 build-linux-arm64 ## Build for all Linux platforms
-
-prepare-binaries: build-all-platforms ## Build binaries and prepare for Docker
-	@echo "Preparing binaries for Docker build..."
-	@mkdir -p binaries/amd64 binaries/arm64
+prepare-binaries-linux-amd64: build-linux-amd64 ## Build and prepare Linux x86_64 binary
+	@echo "Preparing Linux x86_64 binary for Docker build..."
+	@mkdir -p binaries/amd64
 	@cp target/x86_64-unknown-linux-gnu/release/5spot binaries/amd64/
-	@cp target/aarch64-unknown-linux-gnu/release/5spot binaries/arm64/
-	@echo "Binaries ready in binaries/"
-	@ls -lh binaries/amd64/5spot binaries/arm64/5spot
+	@echo "✓ Binary ready: binaries/amd64/5spot"
+	@ls -lh binaries/amd64/5spot
 
-prepare-binaries-native: build ## Prepare native binary for single-platform Docker build
-	@echo "Preparing native binary for Docker build..."
-	@mkdir -p binaries/amd64 binaries/arm64
-	@if [ "$$(uname -m)" = "x86_64" ] || [ "$$(uname -m)" = "amd64" ]; then \
-		cp target/release/5spot binaries/amd64/; \
-		echo "Binary ready in binaries/amd64/"; \
-	elif [ "$$(uname -m)" = "aarch64" ] || [ "$$(uname -m)" = "arm64" ]; then \
-		cp target/release/5spot binaries/arm64/; \
-		echo "Binary ready in binaries/arm64/"; \
-	fi
+prepare-binaries-linux-arm64: build-linux-arm64 ## Build and prepare Linux ARM64 binary
+	@echo "Preparing Linux ARM64 binary for Docker build..."
+	@mkdir -p binaries/arm64
+	@cp target/aarch64-unknown-linux-gnu/release/5spot binaries/arm64/
+	@echo "✓ Binary ready: binaries/arm64/5spot"
+	@ls -lh binaries/arm64/5spot
 
 test: ## Run all tests
 	cargo test --all
@@ -221,12 +242,18 @@ docs-deploy: docs ## Build and deploy documentation to GitHub Pages
 # ============================================================
 
 
-docker-build: prepare-binaries ## Build Docker image (distroless, single platform)
-	$(CONTAINER_TOOL) build --platform $(PLATFORM) -t $(REGISTRY)/$(IMAGE_NAME):$(IMAGE_TAG) \
-		--build-arg VERSION="$(VERSION)" \
-		--build-arg GIT_SHA="$(GIT_SHA)" \
-		--build-arg BASE_IMAGE="$(BASE_IMAGE)" \
-		.
+docker-build: ## Build Docker image (auto-detect host arch, loads to local docker)
+	@echo "Detecting host architecture..."
+	@if [ "$$(uname -m)" = "x86_64" ]; then \
+		echo "Host: x86_64 -> building linux/amd64"; \
+		$(MAKE) docker-build-amd64; \
+	elif [ "$$(uname -m)" = "arm64" ] || [ "$$(uname -m)" = "aarch64" ]; then \
+		echo "Host: arm64 -> building linux/amd64 (default for k8s)"; \
+		$(MAKE) docker-build-amd64; \
+	else \
+		echo "ERROR: Unsupported architecture: $$(uname -m)"; \
+		exit 1; \
+	fi
 
 
 docker-build-chainguard: prepare-binaries ## Build Docker image (Chainguard - zero CVEs)
@@ -242,25 +269,45 @@ docker-push: ## Push Docker image
 docker-push-chainguard: ## Push Chainguard Docker image
 	$(CONTAINER_TOOL) push $(REGISTRY)/$(IMAGE_NAME):$(IMAGE_TAG)-chainguard
 
-docker-buildx: prepare-binaries ## Build and push multi-arch Docker image (distroless)
-	- $(CONTAINER_TOOL) buildx create --name fivespot-builder
+docker-build-amd64: prepare-binaries-linux-amd64 ## Build Docker image for linux/amd64 (loads to local docker)
+	@$(CONTAINER_TOOL) buildx inspect fivespot-builder >/dev/null 2>&1 || \
+		$(CONTAINER_TOOL) buildx create --name fivespot-builder --config ~/.docker/buildx/buildkitd.toml
 	$(CONTAINER_TOOL) buildx use fivespot-builder
-	- $(CONTAINER_TOOL) buildx build --push --platform=$(BUILD_PLATFORMS) -t $(REGISTRY)/$(IMAGE_NAME):$(IMAGE_TAG) \
+	$(CONTAINER_TOOL) buildx build --load --platform=linux/amd64 -t $(IMAGE_NAME):$(IMAGE_TAG)-amd64 \
 		--build-arg VERSION="$(VERSION)" \
 		--build-arg GIT_SHA="$(GIT_SHA)" \
 		--build-arg BASE_IMAGE="$(BASE_IMAGE)" \
 		.
-	- $(CONTAINER_TOOL) buildx rm fivespot-builder
 
-docker-buildx-chainguard: prepare-binaries ## Build and push multi-arch Chainguard image
-	- $(CONTAINER_TOOL) buildx create --name 5-spot-chainguard-builder
-	$(CONTAINER_TOOL) buildx use 5-spot-chainguard-builder
-	- $(CONTAINER_TOOL) buildx build --push --platform=$(BUILD_PLATFORMS) -f Dockerfile.chainguard -t $(REGISTRY)/$(IMAGE_NAME):$(IMAGE_TAG)-chainguard \
+docker-build-arm64: prepare-binaries-linux-arm64 ## Build Docker image for linux/arm64 (loads to local docker)
+	@$(CONTAINER_TOOL) buildx inspect fivespot-builder >/dev/null 2>&1 || \
+		$(CONTAINER_TOOL) buildx create --name fivespot-builder --config ~/.docker/buildx/buildkitd.toml
+	$(CONTAINER_TOOL) buildx use fivespot-builder
+	$(CONTAINER_TOOL) buildx build --load --platform=linux/arm64 -t $(IMAGE_NAME):$(IMAGE_TAG)-arm64 \
+		--build-arg VERSION="$(VERSION)" \
+		--build-arg GIT_SHA="$(GIT_SHA)" \
+		--build-arg BASE_IMAGE="$(BASE_IMAGE)" \
+		.
+
+docker-buildx: prepare-binaries-linux-amd64 ## Build and push Docker image to registry (CI)
+	@$(CONTAINER_TOOL) buildx inspect fivespot-builder >/dev/null 2>&1 || \
+		$(CONTAINER_TOOL) buildx create --name fivespot-builder --config ~/.docker/buildx/buildkitd.toml
+	$(CONTAINER_TOOL) buildx use fivespot-builder
+	$(CONTAINER_TOOL) buildx build --push --platform=linux/amd64 -t $(REGISTRY)/$(IMAGE_NAME):$(IMAGE_TAG) \
+		--build-arg VERSION="$(VERSION)" \
+		--build-arg GIT_SHA="$(GIT_SHA)" \
+		--build-arg BASE_IMAGE="$(BASE_IMAGE)" \
+		.
+
+docker-buildx-chainguard: prepare-binaries-linux-amd64 ## Build and push Chainguard image to registry (CI)
+	@$(CONTAINER_TOOL) buildx inspect fivespot-builder >/dev/null 2>&1 || \
+		$(CONTAINER_TOOL) buildx create --name fivespot-builder --config ~/.docker/buildx/buildkitd.toml
+	$(CONTAINER_TOOL) buildx use fivespot-builder
+	$(CONTAINER_TOOL) buildx build --push --platform=$(BUILD_PLATFORMS) -f Dockerfile.chainguard -t $(REGISTRY)/$(IMAGE_NAME):$(IMAGE_TAG)-chainguard \
 		--build-arg VERSION="$(VERSION)" \
 		--build-arg GIT_SHA="$(GIT_SHA)" \
 		--build-arg BASE_IMAGE="$(CHAINGUARD_BASE_IMAGE)" \
 		.
-	- $(CONTAINER_TOOL) buildx rm 5-spot-chainguard-builder
 
 # ============================================================
 # Deployment
@@ -346,3 +393,9 @@ security-scan-local: gitleaks ## Run local security scans (gitleaks)
 	@gitleaks detect --source . --verbose --redact || true
 	@echo ""
 	@echo "✓ Security scan complete"
+
+sbom: ## Generate CycloneDX SBOM (Software Bill of Materials)
+	@echo "Generating CycloneDX SBOM..."
+	@command -v cargo-cyclonedx >/dev/null 2>&1 || { echo "Installing cargo-cyclonedx..."; cargo install cargo-cyclonedx; }
+	@cargo cyclonedx --format json --spec-version 1.4
+	@echo "✓ SBOM generated: five_spot.cdx.json"

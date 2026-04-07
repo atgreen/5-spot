@@ -1,5 +1,11 @@
 // Reconciliation logic for ScheduledMachine resources
 
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+use kube::{runtime::controller::Action, Client, Resource, ResourceExt};
+use tracing::{debug, error, info};
+
 use crate::constants::{
     ERROR_REQUEUE_SECS, PHASE_ACTIVE, PHASE_DISABLED, PHASE_ERROR, PHASE_INACTIVE, PHASE_PENDING,
     PHASE_SHUTTING_DOWN, PHASE_TERMINATED, REASON_GRACE_PERIOD, REASON_MACHINE_CREATED,
@@ -7,10 +13,10 @@ use crate::constants::{
     REASON_SCHEDULE_INACTIVE, TIMER_REQUEUE_SECS,
 };
 use crate::crd::ScheduledMachine;
-use kube::{runtime::controller::Action, Client, Resource, ResourceExt};
-use std::sync::Arc;
-use std::time::Duration;
-use tracing::{debug, error, info};
+use crate::metrics::{
+    record_error, record_reconciliation_failure, record_reconciliation_success,
+    record_schedule_evaluation, KILL_SWITCH_ACTIVATIONS_TOTAL,
+};
 
 // ============================================================================
 // Context for reconciliation
@@ -77,10 +83,19 @@ pub async fn reconcile_scheduled_machine(
     resource: Arc<ScheduledMachine>,
     ctx: Arc<Context>,
 ) -> Result<Action, ReconcilerError> {
+    let start_time = Instant::now();
     let namespace = resource.namespace().ok_or_else(|| {
+        record_error("invalid_config");
         ReconcilerError::InvalidConfig("ScheduledMachine must be namespaced".to_string())
     })?;
     let name = resource.name_any();
+
+    // Get current phase for metrics (clone to avoid borrow issues)
+    let current_phase = resource
+        .status
+        .as_ref()
+        .and_then(|s| s.phase.clone())
+        .unwrap_or_else(|| PHASE_PENDING.to_string());
 
     info!(
         resource = %name,
@@ -108,16 +123,50 @@ pub async fn reconcile_scheduled_machine(
 
     // Check for deletion
     if resource.meta().deletion_timestamp.is_some() {
-        return handle_deletion(resource, ctx).await;
+        let result = handle_deletion(resource, ctx).await;
+        record_reconciliation_result(&result, &current_phase, start_time.elapsed());
+        return result;
     }
 
     // Add finalizer if not present
     if !has_finalizer(&resource) {
-        return add_finalizer(resource, ctx).await;
+        let result = add_finalizer(resource, ctx).await;
+        record_reconciliation_result(&result, &current_phase, start_time.elapsed());
+        return result;
     }
 
     // Perform actual reconciliation
-    reconcile_inner(resource, ctx).await
+    let result = reconcile_inner(resource, ctx).await;
+    record_reconciliation_result(&result, &current_phase, start_time.elapsed());
+    result
+}
+
+/// Record reconciliation result metrics
+fn record_reconciliation_result(
+    result: &Result<Action, ReconcilerError>,
+    phase: &str,
+    duration: Duration,
+) {
+    let duration_secs = duration.as_secs_f64();
+    match result {
+        Ok(_) => record_reconciliation_success(phase, duration_secs),
+        Err(e) => {
+            record_reconciliation_failure(phase, duration_secs);
+            // Record specific error types
+            match e {
+                ReconcilerError::KubeError(_) => record_error("kube_api"),
+                ReconcilerError::NotFound(_) => record_error("not_found"),
+                ReconcilerError::InvalidConfig(_) => record_error("invalid_config"),
+                ReconcilerError::ScheduleError(_) => record_error("schedule"),
+                ReconcilerError::CapiError(_) => record_error("capi"),
+                ReconcilerError::FileResolutionError(_) => record_error("file_resolution"),
+                ReconcilerError::ReferenceValidationError(_) => {
+                    record_error("reference_validation");
+                }
+                ReconcilerError::Other(_) => record_error("other"),
+            }
+        }
+    }
 }
 
 /// Inner reconciliation logic
@@ -149,11 +198,15 @@ async fn reconcile_inner(
             namespace = %namespace,
             "Kill switch activated - removing machine immediately"
         );
+        KILL_SWITCH_ACTIVATIONS_TOTAL.inc();
         return handle_kill_switch(resource, ctx).await;
     }
 
     // Evaluate schedule
     let should_be_active = evaluate_schedule(&resource.spec.schedule, None)?;
+
+    // Record schedule evaluation metric
+    record_schedule_evaluation(should_be_active);
 
     debug!(
         resource = %name,

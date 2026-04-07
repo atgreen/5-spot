@@ -47,7 +47,7 @@ docker build -t 5spot:latest .
 # Build for multiple platforms
 docker buildx build \
   --platform linux/amd64,linux/arm64 \
-  -t ghcr.io/firestoned/5-spot:latest \
+  -t ghcr.io/finos/5-spot:latest \
   --push .
 ```
 

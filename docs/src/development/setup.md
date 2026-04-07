@@ -21,7 +21,7 @@ Set up your local environment for 5-Spot development.
 ### Clone the Repository
 
 ```bash
-git clone https://github.com/firestoned/5-spot.git
+git clone https://github.com/finos/5-spot.git
 cd 5-spot
 ```
 

@@ -120,22 +120,148 @@ spec:
 - Python 3.10+ (for documentation)
 - Poetry (install via `curl -sSL https://install.python-poetry.org | python3 -`)
 
-### Corporate Network Setup (Optional)
+### Cross-Compilation Setup
 
-If you're behind a corporate firewall or need to use an internal PyPI mirror (e.g., Artifactory), set the `PYPI_INDEX_URL` environment variable before running documentation commands:
+To build Docker images for Linux from macOS, you need a cross-compilation toolchain. The recommended approach is using the `cross` tool:
 
 ```bash
-# Set your corporate PyPI mirror URL
-export PYPI_INDEX_URL=https://artifactory.example.com/api/pypi/pypi/simple
+# Install cross (recommended - handles everything via Docker)
+cargo install cross
 
-# Now documentation commands will use your mirror
+# Build Docker images
+make docker-build          # Auto-detect, defaults to linux/amd64
+make docker-build-amd64    # Explicitly build for linux/amd64
+make docker-build-arm64    # Explicitly build for linux/arm64
+```
+
+**Alternative:** Install GNU cross-compilation toolchains directly (for faster builds without Docker overhead):
+
+```bash
+# Add the cross-toolchains tap
+brew tap messense/macos-cross-toolchains
+
+# For linux/amd64 from macOS
+brew install x86_64-unknown-linux-gnu
+rustup target add x86_64-unknown-linux-gnu
+
+# For linux/arm64 from macOS
+brew install aarch64-unknown-linux-gnu
+rustup target add aarch64-unknown-linux-gnu
+```
+
+The project includes `.cargo/config.toml` with linker configuration for these targets. If building in a different directory, create this config:
+
+```toml
+# .cargo/config.toml
+[target.x86_64-unknown-linux-gnu]
+linker = "x86_64-unknown-linux-gnu-gcc"
+
+[target.aarch64-unknown-linux-gnu]
+linker = "aarch64-unknown-linux-gnu-gcc"
+```
+
+**Note:** The `rustup target add` alone is not sufficient - crates with C dependencies (like `ring`) require a linker from the GNU toolchain.
+
+### Air-Gapped / Corporate Network Setup
+
+If you're in an air-gapped environment or behind a corporate firewall without access to public registries (`crates.io`, `static.rust-lang.org`, `pypi.org`, `gcr.io`), you'll need to configure alternative registries.
+
+#### 1. Cargo Registry (Artifactory)
+
+Create a `.cargo/config.toml` in a dedicated directory to route Rust crates through your Artifactory mirror:
+
+```bash
+mkdir -p ~/.cargo-airgap
+cat > ~/.cargo-airgap/config.toml << 'EOF'
+# Air-gapped Cargo configuration using Artifactory
+[registry]
+default = "artifactory"
+
+[registries.artifactory]
+index = "sparse+https://artifactory.example.com/artifactory/api/cargo/crates-io-remote/index/"
+
+[source.artifactory-remote]
+registry = "sparse+https://artifactory.example.com/artifactory/api/cargo/crates-io-remote/index/"
+
+[source.crates-io]
+replace-with = "artifactory-remote"
+EOF
+```
+
+Then use `AIRGAP_CARGO_HOME` when building:
+
+```bash
+# Build binaries using Artifactory registry
+AIRGAP_CARGO_HOME=~/.cargo-airgap make docker-build-amd64
+
+# Or for arm64
+AIRGAP_CARGO_HOME=~/.cargo-airgap make docker-build-arm64
+```
+
+#### 2. PyPI Mirror (Documentation)
+
+Set `PYPI_INDEX_URL` for documentation builds:
+
+```bash
+export PYPI_INDEX_URL=https://artifactory.example.com/api/pypi/pypi/simple
 make docs-serve
 ```
 
-Add this to your shell profile (`~/.bashrc`, `~/.zshrc`, etc.) for persistence:
+#### 3. Docker Buildx (Container Registries)
+
+For Docker builds, configure buildx to trust your Artifactory mirrors for container images:
 
 ```bash
-export PYPI_INDEX_URL=https://your-artifactory.example.com/api/pypi/pypi/simple
+# Create buildx config directory
+mkdir -p ~/.docker/buildx
+
+# Create buildkitd.toml for Artifactory registries
+cat > ~/.docker/buildx/buildkitd.toml << 'EOF'
+# BuildKit daemon configuration for air-gapped environments
+# Skip TLS verification for internal registries
+
+[registry."artifactory.example.com"]
+  insecure = true
+
+# Add mirrors for common registries (gcr.io, ghcr.io)
+[registry."oss-docker-gcr.artifactory.example.com"]
+  insecure = true
+
+[registry."oss-docker-ghcr.artifactory.example.com"]
+  insecure = true
+EOF
+
+# Create the buildx builder with the config
+docker buildx create --name fivespot-builder --config ~/.docker/buildx/buildkitd.toml
+docker buildx use fivespot-builder
+```
+
+Then build with your mirrored base image:
+
+```bash
+make docker-build-amd64 BASE_IMAGE=oss-docker-gcr.artifactory.example.com/distroless/cc-debian12:nonroot
+```
+
+#### 4. Complete Air-Gapped Build Example
+
+```bash
+# Set environment variables
+export AIRGAP_CARGO_HOME=~/.cargo-airgap
+export PYPI_INDEX_URL=https://artifactory.example.com/api/pypi/pypi/simple
+export BASE_IMAGE=oss-docker-gcr.artifactory.example.com/distroless/cc-debian12:nonroot
+
+# Build Docker image for amd64
+make docker-build-amd64
+
+# Or build for arm64
+make docker-build-arm64
+```
+
+Add these to your shell profile (`~/.bashrc`, `~/.zshrc`) for persistence:
+
+```bash
+export AIRGAP_CARGO_HOME=~/.cargo-airgap
+export PYPI_INDEX_URL=https://artifactory.example.com/api/pypi/pypi/simple
 ```
 
 ### Building

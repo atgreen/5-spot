@@ -1,0 +1,24 @@
+---
+# 5-Spot Controller ServiceMonitor
+# For Prometheus Operator to automatically discover and scrape metrics
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: 5spot-controller
+  namespace: 5spot-system
+  labels:
+    app: 5spot-controller
+    app.kubernetes.io/name: 5spot
+    app.kubernetes.io/component: controller
+spec:
+  selector:
+    matchLabels:
+      app: 5spot-controller
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s
+  namespaceSelector:
+    matchNames:
+      - 5spot-system

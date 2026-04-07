@@ -4,13 +4,13 @@
 # 5-Spot Documentation - MkDocs Material Configuration
 
 site_name: 5-Spot - Kubernetes Machine Scheduler Operator
-site_url: https://firestoned.github.io/5-spot/
+site_url: https://finos.github.io/5-spot/
 site_description: A cloud-native Kubernetes controller for managing time-based machine scheduling on physical nodes using Cluster API (CAPI).
 site_author: Erick Bourgeois
 
 # Repository
-repo_url: https://github.com/firestoned/5-spot
-repo_name: firestoned/5-spot
+repo_url: https://github.com/finos/5-spot
+repo_name: finos/5-spot
 edit_uri: edit/main/docs/src/
 
 # Documentation source directory (relative to mkdocs.yml location)
@@ -174,7 +174,7 @@ extra:
   # Social links
   social:
     - icon: fontawesome/brands/github
-      link: https://github.com/firestoned/5-spot
+      link: https://github.com/finos/5-spot
       name: 5-Spot on GitHub
 
   # Analytics (optional - uncomment if needed)
