@@ -80,6 +80,14 @@ Machine specification for k0smotron.
 
 - **files** (optional, array): Files to be passed to user_data upon creation.
 
+#### bootstrapDataSecretName
+
+(optional, string) Name of an existing Secret containing bootstrap data
+(e.g., an OpenShift worker ignition config). When set, 5-Spot skips
+creating a bootstrap resource and sets `Machine.spec.bootstrap.dataSecretName`
+directly. Mutually exclusive with `bootstrapSpec` — exactly one must be set.
+Must be non-empty.
+
 #### clusterName
 
 (required, string) Name of the CAPI cluster this machine belongs to.
